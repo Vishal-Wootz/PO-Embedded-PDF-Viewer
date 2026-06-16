@@ -3,7 +3,7 @@
 <head>
   <title>Google Multi File Viewer</title>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 
   <style>
     html, body {
@@ -26,8 +26,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      padding: 8px 10px;
+      gap: 6px;
+      padding: 8px;
       box-sizing: border-box;
       border-bottom: 1px solid #ddd;
       background: #f7f7f7;
@@ -40,7 +40,7 @@
       border: 1px solid #ccc;
       border-radius: 6px;
       background: #ffffff;
-      font-size: 16px;
+      font-size: 14px;
       cursor: pointer;
     }
 
@@ -49,15 +49,21 @@
       cursor: not-allowed;
     }
 
+    #pinchModeButton.active {
+      background: #222;
+      color: #fff;
+      border-color: #222;
+    }
+
     #fileCounter {
-      min-width: 86px;
+      min-width: 76px;
       text-align: center;
-      font-size: 14px;
+      font-size: 13px;
       color: #333;
     }
 
     #zoomValue {
-      min-width: 46px;
+      min-width: 42px;
       text-align: center;
       font-size: 12px;
       color: #555;
@@ -68,7 +74,6 @@
       text-decoration: none;
       color: #0066cc;
       white-space: nowrap;
-      margin-left: 4px;
     }
 
     #viewerOuter {
@@ -81,6 +86,7 @@
     }
 
     #viewerScaler {
+      position: relative;
       width: 100%;
       height: 100%;
       transform-origin: top left;
@@ -91,6 +97,30 @@
       height: 100%;
       border: 0;
       display: block;
+    }
+
+    #gestureLayer {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      background: transparent;
+      touch-action: none;
+    }
+
+    #gestureHint {
+      display: none;
+      position: absolute;
+      left: 50%;
+      top: 12px;
+      transform: translateX(-50%);
+      z-index: 20;
+      background: rgba(0, 0, 0, 0.75);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      pointer-events: none;
     }
 
     #errorMessage {
@@ -111,6 +141,8 @@
     <button id="zoomOutButton" class="button" type="button">-</button>
     <div id="zoomValue">100%</div>
     <button id="zoomInButton" class="button" type="button">+</button>
+
+    <button id="pinchModeButton" class="button" type="button">Pinch</button>
     <button id="resetZoomButton" class="button" type="button">Reset</button>
 
     <a id="openOriginal" href="#" target="_blank" rel="noopener noreferrer">Open</a>
@@ -120,6 +152,9 @@
     <div id="viewerScaler">
       <iframe id="viewerFrame" allow="autoplay"></iframe>
     </div>
+
+    <div id="gestureLayer"></div>
+    <div id="gestureHint">Pinch mode on</div>
   </div>
 
   <div id="errorMessage"></div>
@@ -133,12 +168,17 @@
     const maxScale = 4;
     const zoomStep = 0.25;
 
+    let pinchMode = false;
     let initialPinchDistance = null;
     let initialScale = 1;
     let lastTapTime = 0;
 
     const viewerOuter = document.getElementById("viewerOuter");
     const viewerScaler = document.getElementById("viewerScaler");
+    const viewerFrame = document.getElementById("viewerFrame");
+    const gestureLayer = document.getElementById("gestureLayer");
+    const gestureHint = document.getElementById("gestureHint");
+    const pinchModeButton = document.getElementById("pinchModeButton");
 
     function getQueryParam(param) {
       const params = new URLSearchParams(window.location.search);
@@ -194,8 +234,29 @@
       return Math.sqrt(dx * dx + dy * dy);
     }
 
-    viewerOuter.addEventListener("touchstart", function(event) {
+    function setPinchMode(enabled) {
+      pinchMode = enabled;
+
+      if (pinchMode) {
+        gestureLayer.style.display = "block";
+        gestureHint.style.display = "block";
+        viewerFrame.style.pointerEvents = "none";
+        pinchModeButton.classList.add("active");
+      } else {
+        gestureLayer.style.display = "none";
+        gestureHint.style.display = "none";
+        viewerFrame.style.pointerEvents = "auto";
+        pinchModeButton.classList.remove("active");
+      }
+    }
+
+    pinchModeButton.addEventListener("click", function () {
+      setPinchMode(!pinchMode);
+    });
+
+    gestureLayer.addEventListener("touchstart", function(event) {
       if (event.touches.length === 2) {
+        event.preventDefault();
         initialPinchDistance = getTouchDistance(event.touches);
         initialScale = scale;
       }
@@ -211,7 +272,7 @@
       }
     }, { passive: false });
 
-    viewerOuter.addEventListener("touchmove", function(event) {
+    gestureLayer.addEventListener("touchmove", function(event) {
       if (event.touches.length === 2 && initialPinchDistance) {
         event.preventDefault();
 
@@ -222,7 +283,7 @@
       }
     }, { passive: false });
 
-    viewerOuter.addEventListener("touchend", function(event) {
+    gestureLayer.addEventListener("touchend", function(event) {
       if (event.touches.length < 2) {
         initialPinchDistance = null;
       }
@@ -254,10 +315,11 @@
     function loadCurrentFile() {
       const fileId = ids[currentIndex];
 
-      document.getElementById("viewerFrame").src = getPreviewUrl(fileId);
+      viewerFrame.src = getPreviewUrl(fileId);
       document.getElementById("openOriginal").href = getOriginalUrl(fileId);
 
       resetZoom();
+      setPinchMode(false);
       updateControls();
     }
 
