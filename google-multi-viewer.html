@@ -3,7 +3,7 @@
 <head>
   <title>Google Multi File Viewer</title>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
   <style>
     html, body {
@@ -13,12 +13,12 @@
       min-height: 100vh;
       font-family: Arial, sans-serif;
       overflow: hidden;
-      background: #ffffff;
     }
 
     body {
       display: flex;
       flex-direction: column;
+      background: #ffffff;
     }
 
     #toolbar {
@@ -26,71 +26,48 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      padding: 8px 10px;
+      gap: 12px;
+      padding: 8px 12px;
       box-sizing: border-box;
       border-bottom: 1px solid #ddd;
       background: #f7f7f7;
-      flex-shrink: 0;
     }
 
-    .button {
+    .navButton {
+      width: 36px;
       height: 32px;
-      min-width: 34px;
       border: 1px solid #ccc;
       border-radius: 6px;
       background: #ffffff;
-      font-size: 16px;
+      font-size: 20px;
+      line-height: 1;
       cursor: pointer;
     }
 
-    .button:disabled {
+    .navButton:disabled {
       opacity: 0.4;
       cursor: not-allowed;
     }
 
     #fileCounter {
-      min-width: 86px;
+      min-width: 90px;
       text-align: center;
       font-size: 14px;
       color: #333;
     }
 
-    #zoomValue {
-      min-width: 46px;
-      text-align: center;
-      font-size: 12px;
-      color: #555;
-    }
-
     #openOriginal {
-      font-size: 12px;
+      font-size: 13px;
       text-decoration: none;
       color: #0066cc;
       white-space: nowrap;
-      margin-left: 4px;
-    }
-
-    #viewerOuter {
-      flex: 1;
-      width: 100%;
-      overflow: auto;
-      position: relative;
-      background: #ffffff;
-      touch-action: none;
-    }
-
-    #viewerScaler {
-      width: 100%;
-      height: 100%;
-      transform-origin: top left;
+      margin-left: 8px;
     }
 
     #viewerFrame {
+      flex: 1;
       width: 100%;
-      height: 100%;
       border: 0;
-      display: block;
     }
 
     #errorMessage {
@@ -104,41 +81,19 @@
 
 <body>
   <div id="toolbar">
-    <button id="prevButton" class="button" type="button">&lt;</button>
+    <button id="prevButton" class="navButton" type="button">&lt;</button>
     <div id="fileCounter">Quote 1 of 1</div>
-    <button id="nextButton" class="button" type="button">&gt;</button>
-
-    <button id="zoomOutButton" class="button" type="button">-</button>
-    <div id="zoomValue">100%</div>
-    <button id="zoomInButton" class="button" type="button">+</button>
-    <button id="resetZoomButton" class="button" type="button">Reset</button>
-
-    <a id="openOriginal" href="#" target="_blank" rel="noopener noreferrer">Open</a>
+    <button id="nextButton" class="navButton" type="button">&gt;</button>
+    <a id="openOriginal" href="#" target="_blank" rel="noopener noreferrer">Open original</a>
   </div>
 
-  <div id="viewerOuter">
-    <div id="viewerScaler">
-      <iframe id="viewerFrame" allow="autoplay"></iframe>
-    </div>
-  </div>
+  <iframe id="viewerFrame" allow="autoplay"></iframe>
 
   <div id="errorMessage"></div>
 
   <script>
     let ids = [];
     let currentIndex = 0;
-
-    let scale = 1;
-    const minScale = 1;
-    const maxScale = 4;
-    const zoomStep = 0.25;
-
-    let initialPinchDistance = null;
-    let initialScale = 1;
-    let lastTapTime = 0;
-
-    const viewerOuter = document.getElementById("viewerOuter");
-    const viewerScaler = document.getElementById("viewerScaler");
 
     function getQueryParam(param) {
       const params = new URLSearchParams(window.location.search);
@@ -147,7 +102,7 @@
 
     function showError(message) {
       document.getElementById("toolbar").style.display = "none";
-      document.getElementById("viewerOuter").style.display = "none";
+      document.getElementById("viewerFrame").style.display = "none";
 
       const errorDiv = document.getElementById("errorMessage");
       errorDiv.style.display = "block";
@@ -168,76 +123,6 @@
       return `https://drive.google.com/file/d/${fileId}/view`;
     }
 
-    function clamp(value, min, max) {
-      return Math.min(Math.max(value, min), max);
-    }
-
-    function applyZoom(newScale) {
-      scale = clamp(newScale, minScale, maxScale);
-
-      viewerScaler.style.transform = `scale(${scale})`;
-      viewerScaler.style.width = `${100 / scale}%`;
-      viewerScaler.style.height = `${100 / scale}%`;
-
-      document.getElementById("zoomValue").innerText = `${Math.round(scale * 100)}%`;
-    }
-
-    function resetZoom() {
-      applyZoom(1);
-      viewerOuter.scrollLeft = 0;
-      viewerOuter.scrollTop = 0;
-    }
-
-    function getTouchDistance(touches) {
-      const dx = touches[0].clientX - touches[1].clientX;
-      const dy = touches[0].clientY - touches[1].clientY;
-      return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    viewerOuter.addEventListener("touchstart", function(event) {
-      if (event.touches.length === 2) {
-        initialPinchDistance = getTouchDistance(event.touches);
-        initialScale = scale;
-      }
-
-      if (event.touches.length === 1) {
-        const now = Date.now();
-
-        if (now - lastTapTime < 300) {
-          resetZoom();
-        }
-
-        lastTapTime = now;
-      }
-    }, { passive: false });
-
-    viewerOuter.addEventListener("touchmove", function(event) {
-      if (event.touches.length === 2 && initialPinchDistance) {
-        event.preventDefault();
-
-        const currentDistance = getTouchDistance(event.touches);
-        const zoomRatio = currentDistance / initialPinchDistance;
-
-        applyZoom(initialScale * zoomRatio);
-      }
-    }, { passive: false });
-
-    viewerOuter.addEventListener("touchend", function(event) {
-      if (event.touches.length < 2) {
-        initialPinchDistance = null;
-      }
-    });
-
-    document.getElementById("zoomOutButton").addEventListener("click", function () {
-      applyZoom(scale - zoomStep);
-    });
-
-    document.getElementById("zoomInButton").addEventListener("click", function () {
-      applyZoom(scale + zoomStep);
-    });
-
-    document.getElementById("resetZoomButton").addEventListener("click", resetZoom);
-
     function updateControls() {
       document.getElementById("fileCounter").innerText =
         `Quote ${currentIndex + 1} of ${ids.length}`;
@@ -257,7 +142,6 @@
       document.getElementById("viewerFrame").src = getPreviewUrl(fileId);
       document.getElementById("openOriginal").href = getOriginalUrl(fileId);
 
-      resetZoom();
       updateControls();
     }
 
@@ -288,7 +172,6 @@
       if (!ids.length) {
         showError("No valid Google file IDs found.");
       } else {
-        applyZoom(1);
         loadCurrentFile();
       }
     }
