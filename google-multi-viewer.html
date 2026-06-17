@@ -22,15 +22,16 @@
     }
 
     #toolbar {
-      height: 48px;
+      height: 56px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: 10px;
       padding: 8px 12px;
       box-sizing: border-box;
       border-bottom: 1px solid #ddd;
       background: #f7f7f7;
+      flex-shrink: 0;
     }
 
     .navButton {
@@ -42,6 +43,7 @@
       font-size: 20px;
       line-height: 1;
       cursor: pointer;
+      flex-shrink: 0;
     }
 
     .navButton:disabled {
@@ -49,11 +51,25 @@
       cursor: not-allowed;
     }
 
-    #fileCounter {
-      min-width: 90px;
+    #fileInfo {
+      min-width: 120px;
+      max-width: 45%;
       text-align: center;
-      font-size: 14px;
+      overflow: hidden;
+    }
+
+    #fileCounter {
+      font-size: 13px;
       color: #333;
+      margin-bottom: 2px;
+    }
+
+    #fileName {
+      font-size: 12px;
+      color: #666;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     #openOriginal {
@@ -61,7 +77,8 @@
       text-decoration: none;
       color: #0066cc;
       white-space: nowrap;
-      margin-left: 8px;
+      margin-left: 4px;
+      flex-shrink: 0;
     }
 
     #viewerFrame {
@@ -82,8 +99,14 @@
 <body>
   <div id="toolbar">
     <button id="prevButton" class="navButton" type="button">&lt;</button>
-    <div id="fileCounter">Quote 1 of 1</div>
+
+    <div id="fileInfo">
+      <div id="fileCounter">Attachment 1 of 1</div>
+      <div id="fileName">Loading...</div>
+    </div>
+
     <button id="nextButton" class="navButton" type="button">&gt;</button>
+
     <a id="openOriginal" href="#" target="_blank" rel="noopener noreferrer">Open original</a>
   </div>
 
@@ -92,7 +115,7 @@
   <div id="errorMessage"></div>
 
   <script>
-    let ids = [];
+    let files = [];
     let currentIndex = 0;
 
     function getQueryParam(param) {
@@ -115,6 +138,16 @@
         .replace(/[^a-zA-Z0-9_-]/g, "");
     }
 
+    function cleanFileName(name, index) {
+      const cleaned = String(name || "").trim();
+
+      if (cleaned) {
+        return cleaned;
+      }
+
+      return `Attachment ${index + 1}`;
+    }
+
     function getPreviewUrl(fileId) {
       return `https://drive.google.com/file/d/${fileId}/preview`;
     }
@@ -123,24 +156,80 @@
       return `https://drive.google.com/file/d/${fileId}/view`;
     }
 
+    function parseFilesParam() {
+      const filesParam = getQueryParam("files");
+
+      if (!filesParam) {
+        return [];
+      }
+
+      try {
+        const parsed = JSON.parse(filesParam);
+
+        if (!Array.isArray(parsed)) {
+          return [];
+        }
+
+        return parsed
+          .map((item, index) => ({
+            id: cleanFileId(item.id || item.fileId || ""),
+            name: cleanFileName(item.name || item.fileName || "", index)
+          }))
+          .filter(file => file.id);
+
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function parseLegacyIdsParam() {
+      const idsParam = getQueryParam("ids");
+
+      if (!idsParam) {
+        return [];
+      }
+
+      return idsParam
+        .split(",")
+        .map(cleanFileId)
+        .filter(Boolean)
+        .map((id, index) => ({
+          id: id,
+          name: `Attachment ${index + 1}`
+        }));
+    }
+
     function updateControls() {
+      const file = files[currentIndex];
+
       document.getElementById("fileCounter").innerText =
-        `Quote ${currentIndex + 1} of ${ids.length}`;
+        `Attachment ${currentIndex + 1} of ${files.length}`;
+
+      document.getElementById("fileName").innerText =
+        file.name || `Attachment ${currentIndex + 1}`;
 
       document.getElementById("prevButton").disabled = currentIndex === 0;
-      document.getElementById("nextButton").disabled = currentIndex === ids.length - 1;
+      document.getElementById("nextButton").disabled = currentIndex === files.length - 1;
 
-      if (ids.length <= 1) {
+      if (files.length <= 1) {
         document.getElementById("prevButton").style.display = "none";
         document.getElementById("nextButton").style.display = "none";
+      } else {
+        document.getElementById("prevButton").style.display = "inline-block";
+        document.getElementById("nextButton").style.display = "inline-block";
       }
     }
 
     function loadCurrentFile() {
-      const fileId = ids[currentIndex];
+      const file = files[currentIndex];
 
-      document.getElementById("viewerFrame").src = getPreviewUrl(fileId);
-      document.getElementById("openOriginal").href = getOriginalUrl(fileId);
+      if (!file || !file.id) {
+        showError("No valid file found.");
+        return;
+      }
+
+      document.getElementById("viewerFrame").src = getPreviewUrl(file.id);
+      document.getElementById("openOriginal").href = getOriginalUrl(file.id);
 
       updateControls();
     }
@@ -153,27 +242,22 @@
     });
 
     document.getElementById("nextButton").addEventListener("click", function () {
-      if (currentIndex < ids.length - 1) {
+      if (currentIndex < files.length - 1) {
         currentIndex++;
         loadCurrentFile();
       }
     });
 
-    const idsParam = getQueryParam("ids");
+    files = parseFilesParam();
 
-    if (!idsParam) {
-      showError("No Google file IDs were passed.");
+    if (!files.length) {
+      files = parseLegacyIdsParam();
+    }
+
+    if (!files.length) {
+      showError("No files were passed to the viewer.");
     } else {
-      ids = idsParam
-        .split(",")
-        .map(cleanFileId)
-        .filter(Boolean);
-
-      if (!ids.length) {
-        showError("No valid Google file IDs found.");
-      } else {
-        loadCurrentFile();
-      }
+      loadCurrentFile();
     }
   </script>
 </body>
