@@ -56,15 +56,6 @@
       color: #333;
     }
 
-    #fileName {
-      max-width: 260px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: 13px;
-      color: #555;
-    }
-
     #openOriginal {
       font-size: 13px;
       text-decoration: none;
@@ -91,9 +82,8 @@
 <body>
   <div id="toolbar">
     <button id="prevButton" class="navButton" type="button">&lt;</button>
-    <div id="fileCounter">File 1 of 1</div>
+    <div id="fileCounter">Quote 1 of 1</div>
     <button id="nextButton" class="navButton" type="button">&gt;</button>
-    <div id="fileName"></div>
     <a id="openOriginal" href="#" target="_blank" rel="noopener noreferrer">Open original</a>
   </div>
 
@@ -102,7 +92,7 @@
   <div id="errorMessage"></div>
 
   <script>
-    let files = [];
+    let ids = [];
     let currentIndex = 0;
 
     function getQueryParam(param) {
@@ -125,42 +115,6 @@
         .replace(/[^a-zA-Z0-9_-]/g, "");
     }
 
-    function cleanFileName(name, index) {
-      const fallback = `File ${index + 1}`;
-      return String(name || fallback)
-        .trim()
-        .replace(/[<>]/g, "");
-    }
-
-    function getExtension(fileName) {
-      const cleanName = String(fileName || "").toLowerCase().trim();
-      const lastDotIndex = cleanName.lastIndexOf(".");
-
-      if (lastDotIndex === -1) return "";
-
-      return cleanName.substring(lastDotIndex + 1);
-    }
-
-    function getFileType(fileName) {
-      const extension = getExtension(fileName);
-
-      if (extension === "pdf") {
-        return "pdf";
-      }
-
-      if (["png", "jpg", "jpeg", "webp", "gif"].includes(extension)) {
-        return "image";
-      }
-
-      return "other";
-    }
-
-    function getSortRank(fileType) {
-      if (fileType === "pdf") return 1;
-      if (fileType === "image") return 2;
-      return 99;
-    }
-
     function getPreviewUrl(fileId) {
       return `https://drive.google.com/file/d/${fileId}/preview`;
     }
@@ -170,28 +124,23 @@
     }
 
     function updateControls() {
-      const file = files[currentIndex];
-
       document.getElementById("fileCounter").innerText =
-        `File ${currentIndex + 1} of ${files.length}`;
-
-      document.getElementById("fileName").innerText =
-        file.name || `File ${currentIndex + 1}`;
+        `Quote ${currentIndex + 1} of ${ids.length}`;
 
       document.getElementById("prevButton").disabled = currentIndex === 0;
-      document.getElementById("nextButton").disabled = currentIndex === files.length - 1;
+      document.getElementById("nextButton").disabled = currentIndex === ids.length - 1;
 
-      if (files.length <= 1) {
+      if (ids.length <= 1) {
         document.getElementById("prevButton").style.display = "none";
         document.getElementById("nextButton").style.display = "none";
       }
     }
 
     function loadCurrentFile() {
-      const file = files[currentIndex];
+      const fileId = ids[currentIndex];
 
-      document.getElementById("viewerFrame").src = getPreviewUrl(file.id);
-      document.getElementById("openOriginal").href = getOriginalUrl(file.id);
+      document.getElementById("viewerFrame").src = getPreviewUrl(fileId);
+      document.getElementById("openOriginal").href = getOriginalUrl(fileId);
 
       updateControls();
     }
@@ -204,53 +153,24 @@
     });
 
     document.getElementById("nextButton").addEventListener("click", function () {
-      if (currentIndex < files.length - 1) {
+      if (currentIndex < ids.length - 1) {
         currentIndex++;
         loadCurrentFile();
       }
     });
 
     const idsParam = getQueryParam("ids");
-    const namesParam = getQueryParam("names");
 
     if (!idsParam) {
       showError("No Google file IDs were passed.");
     } else {
-      const ids = idsParam
+      ids = idsParam
         .split(",")
-        .map(cleanFileId);
+        .map(cleanFileId)
+        .filter(Boolean);
 
-      const names = namesParam
-        ? namesParam.split(",").map((name, index) => cleanFileName(name, index))
-        : [];
-
-      files = ids
-        .map((id, index) => {
-          const name = names[index] || `File ${index + 1}`;
-          const fileType = getFileType(name);
-
-          return {
-            id: id,
-            name: name,
-            fileType: fileType,
-            originalIndex: index
-          };
-        })
-        .filter(file => {
-          return file.id && ["pdf", "image"].includes(file.fileType);
-        })
-        .sort((a, b) => {
-          const rankDifference = getSortRank(a.fileType) - getSortRank(b.fileType);
-
-          if (rankDifference !== 0) {
-            return rankDifference;
-          }
-
-          return a.originalIndex - b.originalIndex;
-        });
-
-      if (!files.length) {
-        showError("No PDF or image files found.");
+      if (!ids.length) {
+        showError("No valid Google file IDs found.");
       } else {
         loadCurrentFile();
       }
