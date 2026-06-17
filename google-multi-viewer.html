@@ -167,8 +167,9 @@
       ids = idsParam
         .split(",")
         .map(cleanFileId)
-        .filter(Boolean);
-
+        .filter(Boolean)
+        .reverse();
+    
       if (!ids.length) {
         showError("No valid Google file IDs found.");
       } else {
