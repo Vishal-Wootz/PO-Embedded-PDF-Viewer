@@ -6,7 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
   <style>
-    html, body {
+    html,
+    body {
       margin: 0;
       width: 100%;
       height: 100%;
@@ -31,6 +32,7 @@
       box-sizing: border-box;
       border-bottom: 1px solid #ddd;
       background: #f7f7f7;
+      flex-shrink: 0;
     }
 
     .navButton {
@@ -57,16 +59,17 @@
     }
 
     #openOriginal {
+      margin-left: 8px;
       font-size: 13px;
       text-decoration: none;
       color: #0066cc;
       white-space: nowrap;
-      margin-left: 8px;
     }
 
     #viewerFrame {
       flex: 1;
       width: 100%;
+      min-height: 0;
       border: 0;
     }
 
@@ -81,23 +84,76 @@
 
 <body>
   <div id="toolbar">
-    <button id="prevButton" class="navButton" type="button">&lt;</button>
+    <button
+      id="prevButton"
+      class="navButton"
+      type="button"
+      aria-label="Previous attachment"
+    >
+      &lt;
+    </button>
+
     <div id="fileCounter">Quote 1 of 1</div>
-    <button id="nextButton" class="navButton" type="button">&gt;</button>
-    <a id="openOriginal" href="#" target="_blank" rel="noopener noreferrer">Open original</a>
+
+    <button
+      id="nextButton"
+      class="navButton"
+      type="button"
+      aria-label="Next attachment"
+    >
+      &gt;
+    </button>
+
+    <a
+      id="openOriginal"
+      href="#"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Open original
+    </a>
   </div>
 
-  <iframe id="viewerFrame" allow="autoplay"></iframe>
+  <iframe
+    id="viewerFrame"
+    allow="autoplay"
+    title="Google attachment preview"
+  ></iframe>
 
   <div id="errorMessage"></div>
 
   <script>
-    let ids = [];
+    let files = [];
     let currentIndex = 0;
+
+    const supportedImageExtensions = new Set([
+      "png",
+      "jpg",
+      "jpeg",
+      "gif",
+      "webp",
+      "bmp",
+      "heic",
+      "heif"
+    ]);
 
     function getQueryParam(param) {
       const params = new URLSearchParams(window.location.search);
       return params.get(param);
+    }
+
+    function hasUsableValue(value) {
+      if (value === null || value === undefined) {
+        return false;
+      }
+
+      const normalized = String(value).trim().toLowerCase();
+
+      return (
+        normalized !== "" &&
+        normalized !== "null" &&
+        normalized !== "undefined"
+      );
     }
 
     function showError(message) {
@@ -115,6 +171,70 @@
         .replace(/[^a-zA-Z0-9_-]/g, "");
     }
 
+    function cleanFileName(name) {
+      return String(name || "")
+        .trim()
+        .replace(/[<>]/g, "");
+    }
+
+    function cleanMimeType(mimeType) {
+      return String(mimeType || "")
+        .trim()
+        .toLowerCase()
+        .split(";")[0];
+    }
+
+    function getExtension(fileName) {
+      const normalizedName = String(fileName || "")
+        .trim()
+        .toLowerCase();
+
+      const dotIndex = normalizedName.lastIndexOf(".");
+
+      if (dotIndex === -1) {
+        return "";
+      }
+
+      return normalizedName.slice(dotIndex + 1);
+    }
+
+    function getFileType(file) {
+      const mimeType = cleanMimeType(file.mimeType);
+      const extension = getExtension(file.name);
+
+      // Prefer MIME type because a filename might be missing.
+      if (mimeType === "application/pdf") {
+        return "pdf";
+      }
+
+      if (mimeType.startsWith("image/")) {
+        return "image";
+      }
+
+      // Fall back to the filename extension.
+      if (extension === "pdf") {
+        return "pdf";
+      }
+
+      if (supportedImageExtensions.has(extension)) {
+        return "image";
+      }
+
+      return "unsupported";
+    }
+
+    function getSortRank(fileType) {
+      if (fileType === "pdf") {
+        return 1;
+      }
+
+      if (fileType === "image") {
+        return 2;
+      }
+
+      return 99;
+    }
+
     function getPreviewUrl(fileId) {
       return `https://drive.google.com/file/d/${fileId}/preview`;
     }
@@ -123,58 +243,237 @@
       return `https://drive.google.com/file/d/${fileId}/view`;
     }
 
-    function updateControls() {
-      document.getElementById("fileCounter").innerText =
-        `Quote ${currentIndex + 1} of ${ids.length}`;
+    /*
+     * Parses the new combined JSON format.
+     *
+     * Expected shape:
+     * [
+     *   {
+     *     "id": "GOOGLE_FILE_ID",
+     *     "name": "quote.pdf",
+     *     "mimeType": "application/pdf"
+     *   }
+     * ]
+     */
+    function parseJsonFiles(value) {
+      if (!hasUsableValue(value)) {
+        return {
+          valid: false,
+          items: []
+        };
+      }
 
-      document.getElementById("prevButton").disabled = currentIndex === 0;
-      document.getElementById("nextButton").disabled = currentIndex === ids.length - 1;
+      try {
+        let parsed = JSON.parse(value);
 
-      if (ids.length <= 1) {
-        document.getElementById("prevButton").style.display = "none";
-        document.getElementById("nextButton").style.display = "none";
+        // Handles JSON that was accidentally stringified twice.
+        if (typeof parsed === "string") {
+          parsed = JSON.parse(parsed);
+        }
+
+        return {
+          valid: Array.isArray(parsed),
+          items: Array.isArray(parsed) ? parsed : []
+        };
+      } catch (firstError) {
+        /*
+         * URLSearchParams normally decodes the query parameter once.
+         * This fallback handles a value that was encoded twice.
+         */
+        try {
+          let decoded = decodeURIComponent(value);
+          let parsed = JSON.parse(decoded);
+
+          if (typeof parsed === "string") {
+            parsed = JSON.parse(parsed);
+          }
+
+          return {
+            valid: Array.isArray(parsed),
+            items: Array.isArray(parsed) ? parsed : []
+          };
+        } catch (secondError) {
+          console.error("Unable to parse attachment JSON:", secondError);
+
+          return {
+            valid: false,
+            items: []
+          };
+        }
       }
     }
 
-    function loadCurrentFile() {
-      const fileId = ids[currentIndex];
+    /*
+     * New rows:
+     * - Keep PDFs and images only.
+     * - PDFs appear first.
+     * - Images appear second.
+     * - Preserve original relative order within each type.
+     */
+    function normalizeAndSortTypedFiles(incomingFiles) {
+      return incomingFiles
+        .map(function (file, index) {
+          const normalizedFile = {
+            id: cleanFileId(file && file.id),
+            name: cleanFileName(file && file.name),
+            mimeType: cleanMimeType(
+              file && (file.mimeType || file.contentType)
+            ),
+            originalIndex: index
+          };
 
-      document.getElementById("viewerFrame").src = getPreviewUrl(fileId);
-      document.getElementById("openOriginal").href = getOriginalUrl(fileId);
+          normalizedFile.fileType = getFileType(normalizedFile);
+
+          return normalizedFile;
+        })
+        .filter(function (file) {
+          return (
+            file.id &&
+            (
+              file.fileType === "pdf" ||
+              file.fileType === "image"
+            )
+          );
+        })
+        .sort(function (a, b) {
+          const typeDifference =
+            getSortRank(a.fileType) -
+            getSortRank(b.fileType);
+
+          if (typeDifference !== 0) {
+            return typeDifference;
+          }
+
+          return a.originalIndex - b.originalIndex;
+        });
+    }
+
+    /*
+     * Previous rows:
+     * They only have Google file IDs, so the viewer cannot identify
+     * PDFs, images or unsupported file types.
+     *
+     * This retains the existing behavior:
+     * the last ID is displayed first.
+     */
+    function createFilesFromLegacyIdsOnly(idsValue) {
+      if (!hasUsableValue(idsValue)) {
+        return [];
+      }
+
+      return idsValue
+        .split(",")
+        .map(cleanFileId)
+        .filter(Boolean)
+        .reverse()
+        .map(function (id, index) {
+          return {
+            id: id,
+            name: `Attachment ${index + 1}`,
+            mimeType: "",
+            fileType: "legacy",
+            originalIndex: index
+          };
+        });
+    }
+
+    function updateControls() {
+      const file = files[currentIndex];
+
+      document.getElementById("fileCounter").innerText =
+        `Quote ${currentIndex + 1} of ${files.length}`;
+
+      document.getElementById("prevButton").disabled =
+        currentIndex === 0;
+
+      document.getElementById("nextButton").disabled =
+        currentIndex === files.length - 1;
+
+      if (files.length <= 1) {
+        document.getElementById("prevButton").style.display = "none";
+        document.getElementById("nextButton").style.display = "none";
+      } else {
+        document.getElementById("prevButton").style.display = "";
+        document.getElementById("nextButton").style.display = "";
+      }
+
+      document.getElementById("viewerFrame").title =
+        file.name || `Attachment ${currentIndex + 1}`;
+    }
+
+    function loadCurrentFile() {
+      const file = files[currentIndex];
+
+      if (!file) {
+        showError("The selected attachment could not be found.");
+        return;
+      }
+
+      document.getElementById("viewerFrame").src =
+        getPreviewUrl(file.id);
+
+      document.getElementById("openOriginal").href =
+        getOriginalUrl(file.id);
 
       updateControls();
     }
 
-    document.getElementById("prevButton").addEventListener("click", function () {
-      if (currentIndex > 0) {
-        currentIndex--;
-        loadCurrentFile();
-      }
-    });
+    document
+      .getElementById("prevButton")
+      .addEventListener("click", function () {
+        if (currentIndex > 0) {
+          currentIndex--;
+          loadCurrentFile();
+        }
+      });
 
-    document.getElementById("nextButton").addEventListener("click", function () {
-      if (currentIndex < ids.length - 1) {
-        currentIndex++;
-        loadCurrentFile();
-      }
-    });
+    document
+      .getElementById("nextButton")
+      .addEventListener("click", function () {
+        if (currentIndex < files.length - 1) {
+          currentIndex++;
+          loadCurrentFile();
+        }
+      });
 
+    const filesParam = getQueryParam("files");
     const idsParam = getQueryParam("ids");
 
-    if (!idsParam) {
-      showError("No Google file IDs were passed.");
-    } else {
-      ids = idsParam
-        .split(",")
-        .map(cleanFileId)
-        .filter(Boolean)
-        .reverse();
-    
-      if (!ids.length) {
-        showError("No valid Google file IDs found.");
+    const jsonResult = parseJsonFiles(filesParam);
+
+    /*
+     * New rows:
+     * Use the combined attachment JSON.
+     */
+    if (jsonResult.valid) {
+      files = normalizeAndSortTypedFiles(jsonResult.items);
+
+      if (!files.length) {
+        showError("No PDF or image attachments were found.");
       } else {
         loadCurrentFile();
       }
+    }
+
+    /*
+     * Previous rows:
+     * JSON is blank or invalid, so use the IDs-only format.
+     */
+    else if (hasUsableValue(idsParam)) {
+      files = createFilesFromLegacyIdsOnly(idsParam);
+
+      if (!files.length) {
+        showError("No valid Google file IDs were found.");
+      } else {
+        loadCurrentFile();
+      }
+    }
+
+    /*
+     * Neither format was supplied.
+     */
+    else {
+      showError("No viewable attachments were found.");
     }
   </script>
 </body>
