@@ -1,9 +1,14 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <title>Google Multi File Viewer</title>
+
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  />
 
   <style>
     html,
@@ -30,7 +35,7 @@
       gap: 12px;
       padding: 8px 12px;
       box-sizing: border-box;
-      border-bottom: 1px solid #ddd;
+      border-bottom: 1px solid #dddddd;
       background: #f7f7f7;
       flex-shrink: 0;
     }
@@ -38,7 +43,7 @@
     .navButton {
       width: 36px;
       height: 32px;
-      border: 1px solid #ccc;
+      border: 1px solid #cccccc;
       border-radius: 6px;
       background: #ffffff;
       font-size: 20px;
@@ -55,7 +60,7 @@
       min-width: 90px;
       text-align: center;
       font-size: 14px;
-      color: #333;
+      color: #333333;
     }
 
     #openOriginal {
@@ -93,7 +98,9 @@
       &lt;
     </button>
 
-    <div id="fileCounter">Quote 1 of 1</div>
+    <div id="fileCounter">
+      Quote 1 of 1
+    </div>
 
     <button
       id="nextButton"
@@ -117,6 +124,7 @@
   <iframe
     id="viewerFrame"
     allow="autoplay"
+    allowfullscreen
     title="Google attachment preview"
   ></iframe>
 
@@ -134,7 +142,9 @@
       "webp",
       "bmp",
       "heic",
-      "heif"
+      "heif",
+      "tif",
+      "tiff"
     ]);
 
     function getQueryParam(param) {
@@ -161,6 +171,7 @@
       document.getElementById("viewerFrame").style.display = "none";
 
       const errorDiv = document.getElementById("errorMessage");
+
       errorDiv.style.display = "block";
       errorDiv.innerText = message;
     }
@@ -189,20 +200,23 @@
         .trim()
         .toLowerCase();
 
-      const dotIndex = normalizedName.lastIndexOf(".");
+      const lastDotIndex = normalizedName.lastIndexOf(".");
 
-      if (dotIndex === -1) {
+      if (lastDotIndex === -1) {
         return "";
       }
 
-      return normalizedName.slice(dotIndex + 1);
+      return normalizedName.slice(lastDotIndex + 1);
     }
 
     function getFileType(file) {
       const mimeType = cleanMimeType(file.mimeType);
       const extension = getExtension(file.name);
 
-      // Prefer MIME type because a filename might be missing.
+      /*
+       * Prefer MIME type because it is more reliable than the
+       * filename extension.
+       */
       if (mimeType === "application/pdf") {
         return "pdf";
       }
@@ -211,7 +225,10 @@
         return "image";
       }
 
-      // Fall back to the filename extension.
+      /*
+       * Fall back to the filename extension when MIME type is
+       * missing or unavailable.
+       */
       if (extension === "pdf") {
         return "pdf";
       }
@@ -236,17 +253,24 @@
     }
 
     function getPreviewUrl(fileId) {
-      return `https://drive.google.com/file/d/${fileId}/preview`;
+      return (
+        "https://drive.google.com/file/d/" +
+        encodeURIComponent(fileId) +
+        "/preview"
+      );
     }
 
     function getOriginalUrl(fileId) {
-      return `https://drive.google.com/file/d/${fileId}/view`;
+      return (
+        "https://drive.google.com/file/d/" +
+        encodeURIComponent(fileId) +
+        "/view"
+      );
     }
 
     /*
-     * Parses the new combined JSON format.
+     * Expected new JSON format:
      *
-     * Expected shape:
      * [
      *   {
      *     "id": "GOOGLE_FILE_ID",
@@ -254,11 +278,16 @@
      *     "mimeType": "application/pdf"
      *   }
      * ]
+     *
+     * Status values:
+     * - missing: files parameter is blank or absent
+     * - valid: valid JSON array was received
+     * - invalid: files parameter exists but cannot be parsed
      */
     function parseJsonFiles(value) {
       if (!hasUsableValue(value)) {
         return {
-          valid: false,
+          status: "missing",
           items: []
         };
       }
@@ -266,37 +295,56 @@
       try {
         let parsed = JSON.parse(value);
 
-        // Handles JSON that was accidentally stringified twice.
+        /*
+         * Handles JSON that was accidentally stringified twice.
+         */
         if (typeof parsed === "string") {
           parsed = JSON.parse(parsed);
         }
 
+        if (!Array.isArray(parsed)) {
+          return {
+            status: "invalid",
+            items: []
+          };
+        }
+
         return {
-          valid: Array.isArray(parsed),
-          items: Array.isArray(parsed) ? parsed : []
+          status: "valid",
+          items: parsed
         };
       } catch (firstError) {
         /*
-         * URLSearchParams normally decodes the query parameter once.
-         * This fallback handles a value that was encoded twice.
+         * URLSearchParams normally decodes the value once.
+         * This fallback handles accidentally double-encoded JSON.
          */
         try {
-          let decoded = decodeURIComponent(value);
-          let parsed = JSON.parse(decoded);
+          const decodedValue = decodeURIComponent(value);
+          let parsed = JSON.parse(decodedValue);
 
           if (typeof parsed === "string") {
             parsed = JSON.parse(parsed);
           }
 
-          return {
-            valid: Array.isArray(parsed),
-            items: Array.isArray(parsed) ? parsed : []
-          };
-        } catch (secondError) {
-          console.error("Unable to parse attachment JSON:", secondError);
+          if (!Array.isArray(parsed)) {
+            return {
+              status: "invalid",
+              items: []
+            };
+          }
 
           return {
-            valid: false,
+            status: "valid",
+            items: parsed
+          };
+        } catch (secondError) {
+          console.error(
+            "Unable to parse attachments JSON:",
+            secondError
+          );
+
+          return {
+            status: "invalid",
             items: []
           };
         }
@@ -305,36 +353,57 @@
 
     /*
      * New rows:
-     * - Keep PDFs and images only.
-     * - PDFs appear first.
-     * - Images appear second.
-     * - Preserve original relative order within each type.
+     *
+     * 1. Require a valid Google file ID.
+     * 2. Require a non-empty filename.
+     * 3. Keep only PDFs and images.
+     * 4. Sort PDFs first and images second.
+     * 5. Preserve original order within each file type.
      */
     function normalizeAndSortTypedFiles(incomingFiles) {
       return incomingFiles
         .map(function (file, index) {
           const normalizedFile = {
             id: cleanFileId(file && file.id),
-            name: cleanFileName(file && file.name),
-            mimeType: cleanMimeType(
-              file && (file.mimeType || file.contentType)
+
+            name: cleanFileName(
+              file && (
+                file.name ||
+                file.fileName
+              )
             ),
+
+            mimeType: cleanMimeType(
+              file && (
+                file.mimeType ||
+                file.contentType
+              )
+            ),
+
             originalIndex: index
           };
 
-          normalizedFile.fileType = getFileType(normalizedFile);
+          normalizedFile.fileType =
+            getFileType(normalizedFile);
 
           return normalizedFile;
         })
+
+        /*
+         * This filter ensures attachments without names are not
+         * displayed.
+         */
         .filter(function (file) {
           return (
             file.id &&
+            file.name &&
             (
               file.fileType === "pdf" ||
               file.fileType === "image"
             )
           );
         })
+
         .sort(function (a, b) {
           const typeDifference =
             getSortRank(a.fileType) -
@@ -350,11 +419,14 @@
 
     /*
      * Previous rows:
-     * They only have Google file IDs, so the viewer cannot identify
-     * PDFs, images or unsupported file types.
      *
-     * This retains the existing behavior:
-     * the last ID is displayed first.
+     * Old rows contain only comma-separated Google IDs.
+     * Since filenames and MIME types are unavailable, the viewer
+     * cannot determine which legacy attachments have missing names
+     * or unsupported file types.
+     *
+     * This retains the previous behavior where the final ID is
+     * displayed first.
      */
     function createFilesFromLegacyIdsOnly(idsValue) {
       if (!hasUsableValue(idsValue)) {
@@ -369,7 +441,7 @@
         .map(function (id, index) {
           return {
             id: id,
-            name: `Attachment ${index + 1}`,
+            name: "Attachment " + (index + 1),
             mimeType: "",
             fileType: "legacy",
             originalIndex: index
@@ -381,7 +453,10 @@
       const file = files[currentIndex];
 
       document.getElementById("fileCounter").innerText =
-        `Quote ${currentIndex + 1} of ${files.length}`;
+        "Quote " +
+        (currentIndex + 1) +
+        " of " +
+        files.length;
 
       document.getElementById("prevButton").disabled =
         currentIndex === 0;
@@ -390,22 +465,32 @@
         currentIndex === files.length - 1;
 
       if (files.length <= 1) {
-        document.getElementById("prevButton").style.display = "none";
-        document.getElementById("nextButton").style.display = "none";
+        document.getElementById("prevButton").style.display =
+          "none";
+
+        document.getElementById("nextButton").style.display =
+          "none";
       } else {
-        document.getElementById("prevButton").style.display = "";
-        document.getElementById("nextButton").style.display = "";
+        document.getElementById("prevButton").style.display =
+          "";
+
+        document.getElementById("nextButton").style.display =
+          "";
       }
 
       document.getElementById("viewerFrame").title =
-        file.name || `Attachment ${currentIndex + 1}`;
+        file.name ||
+        "Attachment " + (currentIndex + 1);
     }
 
     function loadCurrentFile() {
       const file = files[currentIndex];
 
       if (!file) {
-        showError("The selected attachment could not be found.");
+        showError(
+          "The selected attachment could not be found."
+        );
+
         return;
       }
 
@@ -443,37 +528,54 @@
 
     /*
      * New rows:
-     * Use the combined attachment JSON.
+     *
+     * When valid JSON exists, use only the JSON data.
+     *
+     * Do not fall back to IDs when valid JSON contains no viewable
+     * files. Falling back would cause unnamed or unsupported
+     * attachments to appear again.
      */
-    if (jsonResult.valid) {
-      files = normalizeAndSortTypedFiles(jsonResult.items);
+    if (jsonResult.status === "valid") {
+      files = normalizeAndSortTypedFiles(
+        jsonResult.items
+      );
 
       if (!files.length) {
-        showError("No PDF or image attachments were found.");
+        showError(
+          "No named PDF or image attachments were found."
+        );
       } else {
         loadCurrentFile();
       }
     }
 
     /*
-     * Previous rows:
-     * JSON is blank or invalid, so use the IDs-only format.
+     * Previous rows or malformed new data:
+     *
+     * If JSON is missing or invalid, use the previous IDs-only
+     * column when it is available.
      */
     else if (hasUsableValue(idsParam)) {
-      files = createFilesFromLegacyIdsOnly(idsParam);
+      files = createFilesFromLegacyIdsOnly(
+        idsParam
+      );
 
       if (!files.length) {
-        showError("No valid Google file IDs were found.");
+        showError(
+          "No valid Google file IDs were found."
+        );
       } else {
         loadCurrentFile();
       }
     }
 
     /*
-     * Neither format was supplied.
+     * Neither format contains usable attachment data.
      */
     else {
-      showError("No viewable attachments were found.");
+      showError(
+        "No viewable attachments were found."
+      );
     }
   </script>
 </body>
